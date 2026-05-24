@@ -1,25 +1,22 @@
-import { getLocaties, seedStamData } from './actions';
+import { getLocatiesWithGroepen, seedStamData, getKenmerkGroepen } from './actions';
 import { db } from '../db';
 import { kenmerken } from '../db/schema';
 import ObservatieDashboard from './ObservatieDashboard';
 
 export default async function Home() {
-  // 1. Haal de locaties op via de actie
-  const locatiesResult = await getLocaties();
-  
-  // Door 'as any[]' te gebruiken dwingen we TypeScript om te accepteren dat dit een geldige array is
-  const locatiesLijst = (locatiesResult.success && locatiesResult.data) 
-    ? locatiesResult.data 
-    : [];
+  const locatiesResult = await getLocatiesWithGroepen();
+  const locatiesLijst = locatiesResult.success ? locatiesResult.data : [];
 
-  // 2. Haal alle kenmerken (stamdata) rechtstreeks op uit de DB voor de dropdown
+  const groepenResult = await getKenmerkGroepen();
+  const groepenLijst = groepenResult.success ? groepenResult.data : [];
+
   const alleKenmerken = await db.select().from(kenmerken);
 
-  // Server action voor de seed-knop
   async function handleSeed() {
     'use server';
     await seedStamData();
   }
+
   return (
     <main className="min-h-screen bg-slate-50 p-4 md:p-8 text-slate-800">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -31,7 +28,6 @@ export default async function Home() {
             <p className="text-sm text-slate-500 mt-1">PoC Relational Schema & Next.js Server Actions</p>
           </div>
           
-          {/* Compacte Seed Knop voor het geval dat */}
           <form action={handleSeed}>
             <button 
               type="submit" 
@@ -42,8 +38,12 @@ export default async function Home() {
           </form>
         </div>
 
-        {/* Het Interactieve Dashboard */}
-        <ObservatieDashboard locaties={locatiesLijst} kenmerken={alleKenmerken} />
+        {/* We geven nu ook groepen mee */}
+        <ObservatieDashboard 
+          locaties={locatiesLijst as any} 
+          kenmerken={alleKenmerken as any} 
+          groepen={groepenLijst as any}
+        />
 
       </div>
     </main>

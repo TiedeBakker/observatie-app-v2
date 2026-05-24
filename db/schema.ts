@@ -65,6 +65,18 @@ export const groepKenmerken = sqliteTable('groep_kenmerken', {
   volgorde: integer('volgorde').default(0).notNull(),
 });
 
+// De n-op-m koppeltabel tussen Locaties en Groepen
+// Bepaalt welke parametergroepen beschikbaar zijn op welke locatie
+export const locatieGroepen = sqliteTable('locatie_groepen', {
+  id: uuidPrimaryKey(), // We gebruiken jouw eigen vertrouwde ID helper!
+  locatieId: text('locatie_id')
+    .notNull()
+    .references(() => locaties.id, { onDelete: 'cascade' }),
+  groepId: text('groep_id')
+    .notNull()
+    .references(() => kenmerkGroepen.id, { onDelete: 'cascade' }),
+});
+
 
 // =========================================================================
 // 3. TRANSACTIETABEL (De daadwerkelijke data)
@@ -102,3 +114,4 @@ export type Locatie = typeof locaties.$inferSelect;
 export type Kenmerk = typeof kenmerken.$inferSelect;
 export type KenmerkGroep = typeof kenmerkGroepen.$inferSelect;
 export type Observatie = typeof observaties.$inferSelect;
+export type LocatieGroep = typeof locatieGroepen.$inferSelect;
