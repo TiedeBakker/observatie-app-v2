@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { createObservatie, getObservatiesVanLocatie, createKenmerk } from './actions';
-import { updateGroepVolledig, getGekoppeldeKenmerkenVanGroep, createGroepMetKenmerken } from './actions';
-import { createLocatieMetGroepen, updateLocatieVolledig } from './actions';
+import { updateGroepVolledig, getGekoppeldeKenmerkenVanGroep, createGroepMetKenmerken, getKenmerkenVanGroep } from './actions';
+import { createLocatieMetGroepen, updateLocatieVolledig, createBatchObservaties, BatchObservatieInput } from './actions';
 
 type Locatie = {
     id: string;
@@ -14,8 +14,12 @@ type Locatie = {
     groepen?: { id: string; naam: string; }[];
 };
 type Kenmerk = { id: string; naam: string; dimensie: string | null; type: 'fysisch' | 'chemisch' | 'biologisch'; };
-type Groep = { id: string; naam: string; beschrijving: string | null; };
-
+type Groep = {
+    id: string;
+    naam: string;
+    beschrijving: string | null;
+    groepKenmerken?: { volgorde: number; kenmerk: Kenmerk }[];
+};
 export default function ObservatieDashboard({
     locaties: initieleLocaties = [],
     kenmerken: initieleKenmerken = [],
@@ -61,6 +65,24 @@ export default function ObservatieDashboard({
     const [groepKenmerkIds, setGroepKenmerkIds] = useState<string[]>([]);
     const [groepNaam, setGroepNaam] = useState('');
     const [groepBeschrijving, setGroepBeschrijving] = useState('');
+
+    // Tijd-instellingen
+    const [gebruikActueleTijd, setGebruikActueleTijd] = useState(true);
+    const [handmatigTijdstip, setHandmatigTijdstip] = useState('');
+
+    // Batch invoer-state: Key is het kenmerkId
+    const [batchInvoer, setBatchInvoer] = useState<Record<string, { waarde: string; notities: string }>>({});
+    const [openNotities, setOpenNotities] = useState<Record<string, boolean>>({});
+    const [selectedGroepId, setSelectedGroepId] = useState<string>(() => {
+        const eersteLocatie = initieleLocaties[0];
+        if (eersteLocatie && eersteLocatie.groepen && eersteLocatie.groepen.length > 0) {
+            return eersteLocatie.groepen[0].id;
+        }
+        return groepen[0]?.id || '';
+    });
+    const [actieveFormulierKenmerken, setActieveFormulierKenmerken] = useState<any[]>([]);
+    // Modus voor invoer: true = individueel per parameter, false = batch (alles in één keer)
+    const [individueleInvoer, setIndividueleInvoer] = useState<boolean>(false);
 
     useEffect(() => {
         if (!selectedLocatieId || selectedLocatieId === 'NIEUW') {
@@ -140,6 +162,32 @@ export default function ObservatieDashboard({
             }
         }
     }, [beheerLocatieId, isLocatieBeheren, locaties]);
+    // Zorg dat de batch-invoer de groep pakt van de geselecteerde locatie
+    useEffect(() => {
+        const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
+        if (actieveLocatie && actieveLocatie.groepen && actieveLocatie.groepen.length > 0) {
+            setSelectedGroepId(actieveLocatie.groepen[0].id);
+        } else {
+            setSelectedGroepId('');
+        }
+    }, [selectedLocatieId, locaties]);
+
+    useEffect(() => {
+        async function laadGroepKenmerken() {
+            if (!selectedGroepId) {
+                setActieveFormulierKenmerken([]);
+                return;
+            }
+
+            // Haal alléén de kenmerken van de geselecteerde groep op
+            const res = await getKenmerkenVanGroep(selectedGroepId);
+            if (res.success && res.data) {
+                setActieveFormulierKenmerken(res.data);
+            }
+        }
+
+        laadGroepKenmerken();
+    }, [selectedGroepId]);
 
     // De gecombineerde Submit Handler voor Locatiebeheer
     async function handleLocatieBeherenSubmit(e: React.FormEvent) {
@@ -200,27 +248,6 @@ export default function ObservatieDashboard({
         }
     }
 
-    // // Actie: Locatie Opslaan
-    // async function handleCreateLocatie(e: React.FormEvent) {
-    //     e.preventDefault();
-    //     if (!nieuweNaam) return;
-
-    //     const latVal = (document.getElementById('lat') as HTMLInputElement)?.value;
-    //     const lonVal = (document.getElementById('lon') as HTMLInputElement)?.value;
-    //     const latitude = latVal ? parseFloat(latVal) : undefined;
-    //     const longitude = lonVal ? parseFloat(lonVal) : undefined;
-
-    //     const res = await createLocatie(nieuweNaam, nieuweBeschrijving || undefined, latitude, longitude, gekozenGroepIds);
-
-    //     if (res.success) {
-    //         setIsLocatieBeheren(false);
-    //         setNieuweNaam('');
-    //         setNieuweBeschrijving('');
-    //         setGekozenGroepIds([]);
-    //         window.location.reload();
-    //     }
-    // }
-
     // Actie: Parameter Opslaan
     async function handleCreateParameter(e: React.FormEvent) {
         e.preventDefault();
@@ -267,7 +294,52 @@ export default function ObservatieDashboard({
 
     const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
     const actiefKenmerk = kenmerken.find(k => k.id === selectedKenmerkId);
+    // 1. Zoek de momenteel geselecteerde kenmerkgroep op
+    //const actieveGroep = groepen.find((g: Groep) => g.id === selectedGroepId);
 
+    // 2. Leid de gesorteerde lijst met kenmerken af voor de Turbo-Invoer
+    // const actieveKenmerken = actieveGroep && (actieveGroep as any).groepKenmerken
+    //     ? [...(actieveGroep as any).groepKenmerken]
+    //         .sort((a, b) => a.volgorde - b.volgorde)
+    //         .map(gk => gk.kenmerk)
+    //     : [];
+    async function handleBatchSubmit(e: React.FormEvent) {
+        e.preventDefault();
+
+        const waarnemingen: BatchObservatieInput[] = [];
+
+        Object.entries(batchInvoer).forEach(([kId, data]) => {
+            if (data.waarde.trim() !== '') {
+                waarnemingen.push({
+                    kenmerkId: kId,
+                    waarde: data.waarde,
+                    notities: data.notities.trim() !== '' ? data.notities : null
+                });
+            }
+        });
+
+        if (waarnemingen.length === 0) {
+            alert('Vul minimaal één waarde in.');
+            return;
+        }
+
+        // Tijdstempel bepalen conform SQLite text-indeling
+        const tijdstip = gebruikActueleTijd
+            ? new Date().toISOString()
+            : new Date(handmatigTijdstip).toISOString();
+
+        setStatusMessage('Waarnemingen opslaan...');
+        const res = await createBatchObservaties(selectedLocatieId, tijdstip, waarnemingen);
+
+        if (res.success) {
+            setStatusMessage(`✅ ${waarnemingen.length} waarneming(en) succesvol vastgelegd!`);
+            setBatchInvoer({}); // Maak formulier leeg
+            setOpenNotities({});
+            window.location.reload();
+        } else {
+            setStatusMessage('❌ Fout bij opslaan van waarnemingen.');
+        }
+    }
     return (
         <div className="grid md:grid-cols-2 gap-8">
 
@@ -542,14 +614,43 @@ export default function ObservatieDashboard({
                         </div>
                     </form>
                 )}
-                {/* METING INVOEREN */}
-                {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && (
-                    <form onSubmit={handleObservatieSubmit} className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
+                {/* SCHAKELAAR VOOR INVOERMODUS */}
+{!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && (
+    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+        <div>
+            <h3 className="text-sm font-semibold text-slate-900">Invoermethode</h3>
+            <p className="text-xs text-slate-500">Kies hoe je metingen wilt invoeren op deze locatie.</p>
+        </div>
+        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <button
+                type="button"
+                onClick={() => setIndividueleInvoer(false)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!individueleInvoer 
+                    ? 'bg-white text-blue-600 shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900'}`}
+            >
+                🚀 Turbo Batch-invoer
+            </button>
+            <button
+                type="button"
+                onClick={() => setIndividueleInvoer(true)}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${individueleInvoer 
+                    ? 'bg-white text-emerald-600 shadow-xs' 
+                    : 'text-slate-600 hover:text-slate-900'}`}
+            >
+                📝 Enkele meting
+            </button>
+        </div>
+    </div>
+)}
+                {/* METING INVOEREN (ENKEL)*/}
+                {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && individueleInvoer && (
+                    <form onSubmit={handleObservatieSubmit} className="bg-white p-6 rounded-xl border border-emerald-200 shadow-xs space-y-4">
                         <h2 className="text-lg font-semibold text-slate-900">Meting Vastleggen</h2>
                         <div>
                             <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Wat meet je?</label>
                             <select value={selectedKenmerkId} onChange={(e) => setSelectedKenmerkId(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 text-sm">
-                                {kenmerken.map(k => (
+                                {actieveFormulierKenmerken.map(k => (
                                     <option key={k.id} value={k.id}>{k.naam} ({k.type})</option>
                                 ))}
                             </select>
@@ -564,6 +665,137 @@ export default function ObservatieDashboard({
                         </div>
                         <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2 rounded-lg text-sm shadow-xs">Meting Opslaan</button>
                         {statusMessage && <p className="text-xs text-center font-medium text-slate-600 mt-2">{statusMessage}</p>}
+                    </form>
+                )}
+                {/* ULTRA-SNELLE BATCH INVOER (KENMERKEN) */}
+                {!isLocatieBeheren && !isParameterToevoegen && !individueleInvoer && selectedLocatieId && (
+                    <form onSubmit={handleBatchSubmit} className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm space-y-6">
+
+                        {/* TIJDSTIP CONFIGURATIE (Punt 3) */}
+                        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h3 className="text-sm font-semibold text-slate-900">Tijdstip van waarneming</h3>
+                                <p className="text-xs text-slate-500">Huidige tijd tenzij handmatige historische invoer is gewenst.</p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={gebruikActueleTijd}
+                                        onChange={(e) => setGebruikActueleTijd(e.target.checked)}
+                                        className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    Actuele tijd gebruiken
+                                </label>
+
+                                {!gebruikActueleTijd && (
+                                    <input
+                                        type="datetime-local"
+                                        required
+                                        value={handmatigTijdstip}
+                                        onChange={(e) => setHandmatigTijdstip(e.target.value)}
+                                        className="p-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 bg-white text-slate-900"
+                                    />
+                                )}
+                            </div>
+                        </div>
+
+                        {/* INVOERLIJST OP VOLGORDE (Punt 1 & 2) */}
+                        <div className="space-y-3">
+                            <div className="grid grid-cols-12 gap-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                <div className="col-span-6">Kenmerk (Parameter / Soort)</div>
+                                <div className="col-span-4 text-right">Invoer waarde</div>
+                                <div className="col-span-2 text-center">Notitie</div>
+                            </div>
+
+                            <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                {actieveFormulierKenmerken.map((kenmerk) => {
+                                    const data = batchInvoer[kenmerk.id] || { waarde: '', notities: '' };
+                                    const heeftNotitie = openNotities[kenmerk.id];
+
+                                    return (
+                                        <div key={kenmerk.id} className="p-3 hover:bg-slate-50/50 transition-colors space-y-2">
+                                            <div className="grid grid-cols-12 gap-2 items-center">
+
+                                                {/* Linkerkant: Kenmerk details */}
+                                                <div className="col-span-6">
+                                                    <span className="font-medium text-sm text-slate-800">{kenmerk.naam}</span>
+                                                    {kenmerk.dimensie && (
+                                                        <span className="ml-1.5 text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                                            {kenmerk.dimensie}
+                                                        </span>
+                                                    )}
+                                                    {kenmerk.wetenschappelijkeNaam && (
+                                                        <span className="block text-xs italic text-slate-400">
+                                                            {kenmerk.wetenschappelijkeNaam}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {/* Midden: Invoerveld */}
+                                                <div className="col-span-4 text-right">
+                                                    <input
+                                                        type="text"
+                                                        value={data.waarde}
+                                                        placeholder="--"
+                                                        onChange={(e) => setBatchInvoer({
+                                                            ...batchInvoer,
+                                                            [kenmerk.id]: { ...data, waarde: e.target.value }
+                                                        })}
+                                                        className="w-full max-w-[140px] inline-block p-2 text-right border border-slate-200 rounded-md text-sm font-medium bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                                    />
+                                                </div>
+
+                                                {/* Rechterkant: Notitie trigger */}
+                                                <div className="col-span-2 text-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setOpenNotities({ ...openNotities, [kenmerk.id]: !heeftNotitie })}
+                                                        className={`p-1.5 rounded-md border text-xs transition-colors ${data.notities
+                                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                                            : heeftNotitie
+                                                                ? 'bg-slate-200 text-slate-700 border-slate-300'
+                                                                : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'
+                                                            }`}
+                                                    >
+                                                        💬
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* Verborgen notitieveld */}
+                                            {heeftNotitie && (
+                                                <div className="pl-2 pr-2 pb-1 animate-in slide-in-from-top-1 duration-150">
+                                                    <input
+                                                        type="text"
+                                                        value={data.notities}
+                                                        placeholder="Bijzonderheden (bijv. 'Uitzonderlijk hoog')"
+                                                        onChange={(e) => setBatchInvoer({
+                                                            ...batchInvoer,
+                                                            [kenmerk.id]: { ...data, notities: e.target.value }
+                                                        })}
+                                                        className="w-full p-2 border border-amber-200 bg-amber-50/30 rounded-md text-xs text-slate-800 focus:ring-1 focus:ring-amber-500 placeholder-slate-400"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {/* OPSLAAN KNOP */}
+                        <div className="pt-2 flex items-center justify-between">
+                            <span className="text-xs text-slate-500">
+                                {Object.values(batchInvoer).filter(v => v.waarde !== '').length} van de {actieveFormulierKenmerken.length} ingevuld.
+                            </span>
+                            <button
+                                type="submit"
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm shadow-sm transition-colors flex items-center gap-2"
+                            >
+                                🚀 Opslaan & Committen
+                            </button>
+                        </div>
                     </form>
                 )}
             </div>
