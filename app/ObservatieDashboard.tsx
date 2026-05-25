@@ -41,7 +41,9 @@ export default function ObservatieDashboard({
     const [locatieBeschrijving, setLocatieBeschrijving] = useState('');
     const [isParameterToevoegen, setIsParameterToevoegen] = useState(false);
 
-    // Nieuwe Locatie Form State
+    // Veilige React states voor GPS (i.p.v. document.getElementById)
+    const [locatieLat, setLocatieLat] = useState('');
+    const [locatieLon, setLocatieLon] = useState('');
     const [gekozenGroepIds, setGekozenGroepIds] = useState<string[]>([]);
 
     // Nieuwe Parameter Form State
@@ -68,21 +70,16 @@ export default function ObservatieDashboard({
     const [gebruikActueleTijd, setGebruikActueleTijd] = useState(true);
     const [handmatigTijdstip, setHandmatigTijdstip] = useState('');
 
-    // Batch invoer-state
+    // Batch invoer-state: Key is het kenmerkId
     const [batchInvoer, setBatchInvoer] = useState<Record<string, { waarde: string; notities: string }>>({});
     const [openNotities, setOpenNotities] = useState<Record<string, boolean>>({});
-    const [selectedGroepId, setSelectedGroepId] = useState<string>(() => {
-        const eersteLocatie = initieleLocaties[0];
-        if (eersteLocatie && eersteLocatie.groepen && eersteLocatie.groepen.length > 0) {
-            return eersteLocatie.groepen[0].id;
-        }
-        return groepen[0]?.id || '';
-    });
+    const [selectedGroepId, setSelectedGroepId] = useState<string>('');
     const [actieveFormulierKenmerken, setActieveFormulierKenmerken] = useState<any[]>([]);
     
-    // Modus voor invoer: false = batch (alles in één keer), true = individueel per parameter
+    // Modus voor invoer: true = individueel per parameter, false = batch (alles in één keer)
     const [individueleInvoer, setIndividueleInvoer] = useState<boolean>(false);
 
+    // 1. Laad observaties geschiedenis in bij locatiewijziging
     useEffect(() => {
         if (!selectedLocatieId || selectedLocatieId === 'NIEUW') {
             setObservaties([]);
@@ -97,6 +94,7 @@ export default function ObservatieDashboard({
         laadObservaties();
     }, [selectedLocatieId]);
 
+    // 2. Beheer Groepen vinkjes en gegevens inladen
     useEffect(() => {
         if (!beheerGroepId || !isGroepBeheren) return;
 
@@ -122,16 +120,16 @@ export default function ObservatieDashboard({
         laadGroepKenmerken();
     }, [beheerGroepId, isGroepBeheren, groepen]);
 
+    // 3. Beheer Locatie formulier synchroniseren via zuivere states
     useEffect(() => {
         if (!beheerLocatieId || !isLocatieBeheren) return;
 
         if (beheerLocatieId === 'NIEUW') {
             setLocatieNaam('');
             setLocatieBeschrijving('');
+            setLocatieLat('');
+            setLocatieLon('');
             setGekozenGroepIds([]);
-            const latInput = document.getElementById('lat') as HTMLInputElement;
-            const lonInput = document.getElementById('lon') as HTMLInputElement;
-            if (latInput && lonInput) { latInput.value = ''; lonInput.value = ''; }
             return;
         }
 
@@ -139,13 +137,8 @@ export default function ObservatieDashboard({
         if (actieveLocatie) {
             setLocatieNaam(actieveLocatie.naam);
             setLocatieBeschrijving(actieveLocatie.beschrijving || '');
-
-            const latInput = document.getElementById('lat') as HTMLInputElement;
-            const lonInput = document.getElementById('lon') as HTMLInputElement;
-            if (latInput && lonInput) {
-                latInput.value = actieveLocatie.latitude ? actieveLocatie.latitude.toString() : '';
-                lonInput.value = actieveLocatie.longitude ? actieveLocatie.longitude.toString() : '';
-            }
+            setLocatieLat(actieveLocatie.latitude ? actieveLocatie.latitude.toString() : '');
+            setLocatieLon(actieveLocatie.longitude ? actieveLocatie.longitude.toString() : '');
 
             if (actieveLocatie.groepen) {
                 setGekozenGroepIds(actieveLocatie.groepen.map(g => g.id));
@@ -155,6 +148,7 @@ export default function ObservatieDashboard({
         }
     }, [beheerLocatieId, isLocatieBeheren, locaties]);
 
+    // 4. ESSENTIEEL: Update de actieve groep Id zodra de geselecteerde dashboard-locatie wijzigt
     useEffect(() => {
         const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
         if (actieveLocatie && actieveLocatie.groepen && actieveLocatie.groepen.length > 0) {
@@ -164,13 +158,13 @@ export default function ObservatieDashboard({
         }
     }, [selectedLocatieId, locaties]);
 
+    // 5. Laad kenmerken in die horen bij de actieve groep
     useEffect(() => {
         async function laadGroepKenmerken() {
             if (!selectedGroepId) {
                 setActieveFormulierKenmerken([]);
                 return;
             }
-
             const res = await getKenmerkenVanGroep(selectedGroepId);
             if (res.success && res.data) {
                 setActieveFormulierKenmerken(res.data);
@@ -179,14 +173,13 @@ export default function ObservatieDashboard({
         laadGroepKenmerken();
     }, [selectedGroepId]);
 
+    // Submit handler voor Locatiebeheer met e.preventDefault() en veilige TS error check
     async function handleLocatieBeherenSubmit(e: React.FormEvent) {
         e.preventDefault();
-        if (!locatieNaam) return;
+        if (!locatieNaam || locatieNaam.trim() === '') return;
 
-        const latVal = (document.getElementById('lat') as HTMLInputElement)?.value;
-        const lonVal = (document.getElementById('lon') as HTMLInputElement)?.value;
-        const latitude = latVal ? parseFloat(latVal) : undefined;
-        const longitude = lonVal ? parseFloat(lonVal) : undefined;
+        const latitude = locatieLat ? parseFloat(locatieLat) : undefined;
+        const longitude = locatieLon ? parseFloat(locatieLon) : undefined;
 
         if (beheerLocatieId === 'NIEUW') {
             setStatusMessage('Nieuwe locatie aanmaken...');
@@ -197,6 +190,8 @@ export default function ObservatieDashboard({
                 window.location.reload();
             } else {
                 setStatusMessage('❌ Fout bij aanmaken locatie.');
+                const errorMsg = ('error' in res) ? res.error : 'Onbekende fout';
+                alert('Fout bij opslaan: ' + errorMsg);
             }
         } else {
             setStatusMessage('Locatie bijwerken...');
@@ -207,6 +202,8 @@ export default function ObservatieDashboard({
                 window.location.reload();
             } else {
                 setStatusMessage('❌ Fout bij bijwerken locatie.');
+                const errorMsg = ('error' in res) ? res.error : 'Onbekende fout';
+                alert('Fout bij updaten: ' + errorMsg);
             }
         }
     }
@@ -306,7 +303,7 @@ export default function ObservatieDashboard({
 
         if (res.success) {
             setStatusMessage(`✅ ${waarnemingen.length} waarneming(en) succesvol vastgelegd!`);
-            setBatchInvoer({});
+            setBatchInvoer({}); 
             setOpenNotities({});
             window.location.reload();
         } else {
@@ -401,105 +398,76 @@ export default function ObservatieDashboard({
                     </form>
                 )}
 
-                {/* FORMULIER: Parametergroep Beheer (Aanmaken & Muteren) */}
+                {/* FORMULIER: Parametergroep Beheer */}
                 {isGroepBeheren && (
                     <form onSubmit={handleGroepBeheerSubmit} className="bg-amber-50/40 p-6 rounded-xl border border-amber-300 space-y-4 animate-in fade-in duration-200">
                         <h2 className="text-base font-semibold text-amber-950">
                             {beheerGroepId === 'NIEUW' ? '✨ Nieuwe Parametergroep Aanmaken' : '⚙️ Parametergroep Details & Kenmerken Muteren'}
                         </h2>
-
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 items-end">
-                            <div className="sm:col-span-3">
-                                <label className="block text-xs font-medium text-amber-800 uppercase tracking-wider mb-1">Selecteer Groep / Actie</label>
-                                <select
-                                    value={beheerGroepId}
-                                    onChange={(e) => setBeheerGroepId(e.target.value)}
-                                    className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-amber-500"
-                                >
-                                    <option value="NIEUW">✨ -- Nieuwe Groep Aanmaken --</option>
-                                    {groepen.map(g => (
-                                        <option key={g.id} value={g.id}>{g.naam}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div className="p-4 bg-white/60 rounded-lg border border-amber-200/60 space-y-3">
-                            <div>
-                                <label className="block text-xs font-medium text-amber-800 uppercase tracking-wider mb-1">Groepsnaam *</label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={groepNaam || ''}
-                                    onChange={(e) => setGroepNaam(e.target.value)}
-                                    placeholder="Bijv. Grondwatermetingen, Meterstanden"
-                                    className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-amber-500"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-amber-800 uppercase tracking-wider mb-1">Beschrijving</label>
-                                <textarea
-                                    value={groepBeschrijving || ''}
-                                    onChange={(e) => setGroepBeschrijving(e.target.value)}
-                                    rows={2}
-                                    placeholder="Waar is deze set metingen voor bedoeld?..."
-                                    className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-amber-500"
-                                />
-                            </div>
-                        </div>
-
                         <div>
-                            <label className="block text-xs font-medium text-amber-800 uppercase tracking-wider mb-2">
-                                Kenmerken in deze groep
-                            </label>
-                            <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2 max-h-48 overflow-y-auto shadow-inner">
-                                {kenmerken.map(k => {
-                                    const isGevinkt = groepKenmerkIds.includes(k.id);
-                                    return (
-                                        <label key={k.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
-                                            <input
-                                                type="checkbox"
-                                                checked={isGevinkt}
-                                                onChange={(e) => {
-                                                    const { checked } = e.target;
-                                                    setGroepKenmerkIds(prev => 
-                                                        checked ? [...prev, k.id] : prev.filter(id => id !== k.id)
-                                                    );
-                                                }}
-                                                className="rounded border-amber-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
-                                            />
-                                            <span className="font-medium">{k.naam}</span>
-                                            <span className="text-xs text-slate-400 italic">({k.type}{k.dimensie ? `, ${k.dimensie}` : ''})</span>
-                                        </label>
-                                    );
-                                })}
+                            <select
+                                value={beheerGroepId}
+                                onChange={(e) => setBeheerGroepId(e.target.value)}
+                                className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm font-medium"
+                            >
+                                <option value="NIEUW">✨ -- Nieuwe Groep Aanmaken --</option>
+                                {groepen.map(g => (
+                                    <option key={g.id} value={g.id}>{g.naam}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div className="p-4 bg-white/60 rounded-lg border border-amber-200/60 space-y-3">
+                            <input
+                                type="text"
+                                required
+                                value={groepNaam}
+                                onChange={(e) => setGroepNaam(e.target.value)}
+                                placeholder="Groepsnaam *"
+                                className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm"
+                            />
+                            <textarea
+                                value={groepBeschrijving}
+                                onChange={(e) => setGroepBeschrijving(e.target.value)}
+                                rows={2}
+                                placeholder="Beschrijving..."
+                                className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm"
+                            />
+                        </div>
+                        <div>
+                            <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2 max-h-48 overflow-y-auto">
+                                {kenmerken.map(k => (
+                                    <label key={k.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={groepKenmerkIds.includes(k.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) setGroepKenmerkIds([...groepKenmerkIds, k.id]);
+                                                else setGroepKenmerkIds(groepKenmerkIds.filter(id => id !== k.id));
+                                            }}
+                                            className="rounded border-amber-300 text-amber-600 w-4 h-4"
+                                        />
+                                        <span>{k.naam} <span className="text-xs text-slate-400 italic">({k.dimensie || 'geen eenheid'})</span></span>
+                                    </label>
+                                ))}
                             </div>
                         </div>
-
                         <div className="flex gap-2">
-                            <button type="submit" className="flex-1 bg-amber-700 hover:bg-amber-800 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">
-                                {beheerGroepId === 'NIEUW' ? 'Groep Aanmaken & Koppelen' : 'Wijzigingen Opslaan'}
-                            </button>
-                            <button type="button" onClick={() => setIsGroepBeheren(false)} className="px-4 py-2 text-sm bg-white border rounded-lg text-slate-600">
-                                Annuleren
-                            </button>
+                            <button type="submit" className="flex-1 bg-amber-700 text-white font-medium py-2 rounded-lg text-sm">Groep Opslaan</button>
                         </div>
                     </form>
                 )}
 
-                {/* FORMULIER: Locatie Beheer (Aanmaken & Muteren) */}
+                {/* FORMULIER: Locatie Beheer */}
                 {isLocatieBeheren && (
                     <form onSubmit={handleLocatieBeherenSubmit} className="bg-emerald-50/40 p-6 rounded-xl border border-emerald-300 space-y-4 animate-in fade-in duration-200">
                         <h2 className="text-base font-semibold text-emerald-950">
                             {beheerLocatieId === 'NIEUW' ? '✨ Nieuwe Locatie Aanmaken' : '⚙️ Locatienaam & Groepskoppelingen Muteren'}
                         </h2>
-
                         <div>
-                            <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-1">Selecteer Locatie / Actie</label>
                             <select
                                 value={beheerLocatieId}
                                 onChange={(e) => setBeheerLocatieId(e.target.value)}
-                                className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm font-medium focus:ring-2 focus:ring-emerald-500"
+                                className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm font-medium"
                             >
                                 <option value="NIEUW">✨ -- Nieuwe Locatie Aanmaken --</option>
                                 {locaties.map(l => (
@@ -507,94 +475,65 @@ export default function ObservatieDashboard({
                                 ))}
                             </select>
                         </div>
-
                         <div className="p-4 bg-white/60 rounded-lg border border-emerald-200/60 space-y-3">
-                            <div>
-                                <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-1">
-                                    Naam locatie *
-                                </label>
-                                <input
-                                    type="text"
-                                    required
-                                    value={locatieNaam || ''}
-                                    onChange={(e) => setLocatieNaam(e.target.value)}
-                                    placeholder="Bijv. Meetstation Noord, Sloot A"
-                                    className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-1">Beschrijving</label>
-                                <textarea
-                                    value={locatieBeschrijving || ''}
-                                    onChange={(e) => setLocatieBeschrijving(e.target.value)}
-                                    rows={2}
-                                    placeholder="Details over bereikbaarheid, sleutels of referentieniveaus..."
-                                    className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
-                                />
-                            </div>
+                            <input
+                                type="text"
+                                required
+                                value={locatieNaam}
+                                onChange={(e) => setLocatieNaam(e.target.value)}
+                                placeholder="Naam locatie *"
+                                className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm"
+                            />
+                            <textarea
+                                value={locatieBeschrijving}
+                                onChange={(e) => setLocatieBeschrijving(e.target.value)}
+                                rows={2}
+                                placeholder="Beschrijving..."
+                                className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm"
+                            />
                         </div>
-
                         <div>
-                            <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-2">
-                                Koppel aan Parametergroep(en) (Meerdere mogelijk)
-                            </label>
-                            <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-2 max-h-32 overflow-y-auto shadow-inner">
-                                {groepen.map(g => {
-                                    const isGevinkt = gekozenGroepIds.includes(g.id);
-                                    return (
-                                        <label key={g.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
-                                            <input
-                                                type="checkbox"
-                                                checked={isGevinkt}
-                                                onChange={(e) => {
-                                                    const { checked } = e.target;
-                                                    setGekozenGroepIds(prev => 
-                                                        checked ? [...prev, g.id] : prev.filter(id => id !== g.id)
-                                                    );
-                                                }}
-                                                className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                                            />
-                                            <span className="font-medium">{g.naam}</span>
-                                        </label>
-                                    );
-                                })}
+                            <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-2">Koppel aan Parametergroep(en)</label>
+                            <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-2 max-h-32 overflow-y-auto">
+                                {groepen.map(g => (
+                                    <label key={g.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={gekozenGroepIds.includes(g.id)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) setGekozenGroepIds([...gekozenGroepIds, g.id]);
+                                                else setGekozenGroepIds(gekozenGroepIds.filter(id => id !== g.id));
+                                            }}
+                                            className="rounded border-emerald-300 text-emerald-600 w-4 h-4"
+                                        />
+                                        <span>{g.naam}</span>
+                                    </label>
+                                ))}
                             </div>
                         </div>
-
                         <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-2">
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">GPS Coördinaten</span>
                                 <button type="button" onClick={() => {
                                     navigator.geolocation.getCurrentPosition((pos) => {
-                                        const latInput = document.getElementById('lat') as HTMLInputElement;
-                                        const lonInput = document.getElementById('lon') as HTMLInputElement;
-                                        if (latInput && lonInput) {
-                                            latInput.value = pos.coords.latitude.toFixed(6);
-                                            lonInput.value = pos.coords.longitude.toFixed(6);
-                                        }
+                                        setLocatieLat(pos.coords.latitude.toFixed(6));
+                                        setLocatieLon(pos.coords.longitude.toFixed(6));
                                     });
                                 }} className="bg-blue-50 text-blue-600 px-2 py-1 rounded text-xs border border-blue-200">📍 Haal GPS op</button>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                                <input type="text" id="lat" placeholder="Latitude" className="p-2 border border-slate-200 bg-slate-50 text-slate-500 rounded text-xs" readOnly />
-                                <input type="text" id="lon" placeholder="Longitude" className="p-2 border border-slate-200 bg-slate-50 text-slate-500 rounded text-xs" readOnly />
+                                <input type="text" placeholder="Latitude" value={locatieLat} onChange={(e) => setLocatieLat(e.target.value)} className="p-2 border border-slate-200 bg-white rounded text-xs text-slate-800" />
+                                <input type="text" placeholder="Longitude" value={locatieLon} onChange={(e) => setLocatieLon(e.target.value)} className="p-2 border border-slate-200 bg-white rounded text-xs text-slate-800" />
                             </div>
                         </div>
-
                         <div className="flex gap-2">
-                            <button type="submit" className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white font-medium py-2 rounded-lg text-sm transition-colors">
-                                {beheerLocatieId === 'NIEUW' ? 'Locatie Aanmaken' : 'Wijzigingen Opslaan'}
-                            </button>
-                            <button type="button" onClick={() => setIsLocatieBeheren(false)} className="px-4 py-2 text-sm bg-white border rounded-lg text-slate-600">
-                                Annuleren
-                            </button>
+                            <button type="submit" className="flex-1 bg-emerald-700 text-white font-medium py-2 rounded-lg text-sm">Wijzigingen Opslaan</button>
                         </div>
                     </form>
                 )}
 
                 {/* SCHAKELAAR VOOR INVOERMODUS */}
-                {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && (
+                {!isLocatieBeheren && !isParameterToevoegen && !isGroepBeheren && selectedLocatieId && (
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
                         <div>
                             <h3 className="text-sm font-semibold text-slate-900">Invoermethode</h3>
@@ -624,14 +563,14 @@ export default function ObservatieDashboard({
                 )}
 
                 {/* METING INVOEREN (ENKEL) */}
-                {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && individueleInvoer && (
+                {!isLocatieBeheren && !isParameterToevoegen && !isGroepBeheren && selectedLocatieId && individueleInvoer && (
                     <form onSubmit={handleObservatieSubmit} className="bg-white p-6 rounded-xl border border-emerald-200 shadow-xs space-y-4">
                         <h2 className="text-lg font-semibold text-slate-900">Meting Vastleggen</h2>
                         <div>
                             <label className="block text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Wat meet je?</label>
                             <select value={selectedKenmerkId} onChange={(e) => setSelectedKenmerkId(e.target.value)} className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 text-sm">
-                                {actieveFormulierKenmerken.map(k => (
-                                    <option key={k.id} value={k.id}>{k.naam} ({k.type})</option>
+                                {kenmerken.map(k => (
+                                    <option key={k.id} value={k.id}>{k.naam} {k.dimensie ? `(${k.dimensie})` : ''}</option>
                                 ))}
                             </select>
                         </div>
@@ -649,10 +588,8 @@ export default function ObservatieDashboard({
                 )}
 
                 {/* ULTRA-SNELLE BATCH INVOER */}
-                {!isLocatieBeheren && !isParameterToevoegen && !individueleInvoer && selectedLocatieId && (
+                {!isLocatieBeheren && !isParameterToevoegen && !isGroepBeheren && !individueleInvoer && selectedLocatieId && (
                     <form onSubmit={handleBatchSubmit} className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm space-y-6">
-
-                        {/* TIJDSTIP CONFIGURATIE */}
                         <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
                                 <h3 className="text-sm font-semibold text-slate-900">Tijdstip van waarneming</h3>
@@ -668,7 +605,6 @@ export default function ObservatieDashboard({
                                     />
                                     Actuele tijd gebruiken
                                 </label>
-
                                 {!gebruikActueleTijd && (
                                     <input
                                         type="datetime-local"
@@ -681,101 +617,83 @@ export default function ObservatieDashboard({
                             </div>
                         </div>
 
-                        {/* INVOERLIJST OP VOLGORDE */}
                         <div className="space-y-3">
-                            <div className="grid grid-cols-12 gap-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                                <div className="col-span-6">Kenmerk (Parameter / Soort)</div>
-                                <div className="col-span-4 text-right">Invoer waarde</div>
-                                <div className="col-span-2 text-center">Notitie</div>
-                            </div>
+                            {actieveFormulierKenmerken.length === 0 ? (
+                                <p className="text-xs text-amber-600 italic bg-amber-50 p-4 text-center rounded-lg border border-dashed border-amber-300">
+                                    ⚠️ Deze locatie is nog niet gekoppeld aan een parametergroep, of de groep bevat geen parameters. Koppel een groep via '📍 Locatie Beheren' of kies hierboven '📝 Enkele meting'.
+                                </p>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-12 gap-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                                        <div className="col-span-6">Kenmerk (Parameter / Soort)</div>
+                                        <div className="col-span-4 text-right">Invoer waarde</div>
+                                        <div className="col-span-2 text-center">Notitie</div>
+                                    </div>
 
-                            <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                {actieveFormulierKenmerken.map((kenmerk) => {
-                                    const data = batchInvoer[kenmerk.id] || { waarde: '', notities: '' };
-                                    const heeftNotitie = openNotities[kenmerk.id];
+                                    <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
+                                        {actieveFormulierKenmerken.map((kenmerk) => {
+                                            const data = batchInvoer[kenmerk.id] || { waarde: '', notities: '' };
+                                            const heeftNotitie = openNotities[kenmerk.id];
 
-                                    return (
-                                        <div key={kenmerk.id} className="p-3 hover:bg-slate-50/50 transition-colors space-y-2">
-                                            <div className="grid grid-cols-12 gap-2 items-center">
-
-                                                {/* Linkerkant: Kenmerk details */}
-                                                <div className="col-span-6">
-                                                    <span className="font-medium text-sm text-slate-800">{kenmerk.naam}</span>
-                                                    {kenmerk.dimensie && (
-                                                        <span className="ml-1.5 text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
-                                                            {kenmerk.dimensie}
-                                                        </span>
+                                            return (
+                                                <div key={kenmerk.id} className="p-3 hover:bg-slate-50/50 transition-colors space-y-2">
+                                                    <div className="grid grid-cols-12 gap-2 items-center">
+                                                        <div className="col-span-6">
+                                                            <span className="font-medium text-sm text-slate-800">{kenmerk.naam}</span>
+                                                            {kenmerk.dimensie && (
+                                                                <span className="ml-1.5 text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                                                    {kenmerk.dimensie}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="col-span-4 text-right">
+                                                            <input
+                                                                type="text"
+                                                                value={data.waarde}
+                                                                placeholder="--"
+                                                                onChange={(e) => setBatchInvoer({
+                                                                    ...batchInvoer,
+                                                                    [kenmerk.id]: { ...data, waarde: e.target.value }
+                                                                })}
+                                                                className="w-full max-w-[140px] inline-block p-2 text-right border border-slate-200 rounded-md text-sm font-medium bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                            />
+                                                        </div>
+                                                        <div className="col-span-2 text-center">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => setOpenNotities({ ...openNotities, [kenmerk.id]: !heeftNotitie })}
+                                                                className={`p-1.5 rounded-md border text-xs transition-colors ${data.notities ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200'}`}
+                                                            >
+                                                                💬
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {heeftNotitie && (
+                                                        <input
+                                                            type="text"
+                                                            value={data.notities}
+                                                            placeholder="Bijzonderheden..."
+                                                            onChange={(e) => setBatchInvoer({
+                                                                ...batchInvoer,
+                                                                [kenmerk.id]: { ...data, notities: e.target.value }
+                                                            })}
+                                                            className="w-full p-2 border border-amber-200 bg-amber-50/30 rounded-md text-xs"
+                                                        />
                                                     )}
-                                                    {kenmerk.wetenschappelijkeNaam && (
-                                                        <span className="block text-xs italic text-slate-400">
-                                                            {kenmerk.wetenschappelijkeNaam}
-                                                        </span>
-                                                    )}
                                                 </div>
-
-                                                {/* Midden: Invoerveld */}
-                                                <div className="col-span-4 text-right">
-                                                    <input
-                                                        type="text"
-                                                        value={data.waarde}
-                                                        placeholder="--"
-                                                        onChange={(e) => setBatchInvoer({
-                                                            ...batchInvoer,
-                                                            [kenmerk.id]: { ...data, waarde: e.target.value }
-                                                        })}
-                                                        className="w-full max-w-[140px] inline-block p-2 text-right border border-slate-200 rounded-md text-sm font-medium bg-white text-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                                                    />
-                                                </div>
-
-                                                {/* Rechterkant: Notitie trigger */}
-                                                <div className="col-span-2 text-center">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => setOpenNotities({ ...openNotities, [kenmerk.id]: !heeftNotitie })}
-                                                        className={`p-1.5 rounded-md border text-xs transition-colors ${data.notities
-                                                            ? 'bg-amber-50 text-amber-700 border-amber-200'
-                                                            : heeftNotitie
-                                                                ? 'bg-slate-200 text-slate-700 border-slate-300'
-                                                                : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'
-                                                            }`}
-                                                    >
-                                                        💬
-                                                    </button>
-                                                </div>
-                                            </div>
-
-                                            {/* Verborgen notitieveld */}
-                                            {heeftNotitie && (
-                                                <div className="pl-2 pr-2 pb-1 animate-in slide-in-from-top-1 duration-150">
-                                                    <input
-                                                        type="text"
-                                                        value={data.notities}
-                                                        placeholder="Bijzonderheden (bijv. 'Uitzonderlijk hoog')"
-                                                        onChange={(e) => setBatchInvoer({
-                                                            ...batchInvoer,
-                                                            [kenmerk.id]: { ...data, notities: e.target.value }
-                                                        })}
-                                                        className="w-full p-2 border border-amber-200 bg-amber-50/30 rounded-md text-xs text-slate-800 focus:ring-1 focus:ring-amber-500 placeholder-slate-400"
-                                                    />
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        {/* OPSLAAN KNOP */}
-                        <div className="pt-2 flex items-center justify-between">
-                            <span className="text-xs text-slate-500">
-                                {Object.values(batchInvoer).filter(v => v.waarde !== '').length} van de {actieveFormulierKenmerken.length} ingevuld.
-                            </span>
-                            <button
-                                type="submit"
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm shadow-sm transition-colors flex items-center gap-2"
-                            >
-                                🚀 Opslaan & Committen
-                            </button>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="pt-2 flex items-center justify-between">
+                                        <span className="text-xs text-slate-500">
+                                            {Object.values(batchInvoer).filter(v => v.waarde !== '').length} van de {actieveFormulierKenmerken.length} ingevuld.
+                                        </span>
+                                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+                                            🚀 Opslaan & Committen
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </form>
                 )}
