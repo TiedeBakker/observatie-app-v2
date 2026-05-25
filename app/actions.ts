@@ -448,3 +448,49 @@ export async function getKenmerkenVanGroep(groepId: string) {
         return { success: false, data: [] };
     }
 }
+// Voeg meerdere kenmerken (parameters) in één keer toe (Bulk)
+export async function createBatchKenmerken(
+    parameters: { naam: string; type: 'fysisch' | 'chemisch' | 'biologisch'; dimensie: string | null }[]
+) {
+    try {
+        const schoneParams = parameters.map(p => ({
+            naam: p.naam.trim(),
+            type: p.type,
+            dimensie: p.dimensie ? p.dimensie.trim() : null
+        })).filter(p => p.naam !== '');
+
+        if (schoneParams.length === 0) {
+            return { success: false, error: 'Geen geldige parameters om toe te voegen.' };
+        }
+
+        const ingevoegdeKenmerken = await db.insert(kenmerken).values(schoneParams).returning();
+        return { success: true, data: ingevoegdeKenmerken };
+    } catch (error) {
+        console.error('Fout bij bulk-aanmaken parameters:', error);
+        return { success: false, error: 'Kon de parameters niet in bulk opslaan.' };
+    }
+}
+// Werk een bestaande parameter (kenmerk) bij
+export async function updateKenmerkVolledig(
+    id: string,
+    naam: string,
+    type: 'fysisch' | 'chemisch' | 'biologisch',
+    dimensie: string | null
+) {
+    try {
+        const upgedateKenmerk = await db
+            .update(kenmerken)
+            .set({
+                naam: naam.trim(),
+                type: type,
+                dimensie: dimensie ? dimensie.trim() : null
+            })
+            .where(eq(kenmerken.id, id))
+            .returning();
+
+        return { success: true, data: upgedateKenmerk };
+    } catch (error) {
+        console.error('Fout bij bijwerken parameter:', error);
+        return { success: false, error: 'Kon de parameter niet bijwerken in de database.' };
+    }
+}

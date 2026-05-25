@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createObservatie, getObservatiesVanLocatie, createKenmerk } from './actions';
+import { createObservatie, getObservatiesVanLocatie, createKenmerk, createBatchKenmerken } from './actions';
 import { updateGroepVolledig, getGekoppeldeKenmerkenVanGroep, createGroepMetKenmerken, getKenmerkenVanGroep } from './actions';
-import { createLocatieMetGroepen, updateLocatieVolledig, createBatchObservaties, BatchObservatieInput } from './actions';
+import { createLocatieMetGroepen, updateLocatieVolledig, createBatchObservaties, BatchObservatieInput, updateKenmerkVolledig} from './actions';
 
 type Locatie = {
     id: string;
@@ -65,6 +65,11 @@ export default function ObservatieDashboard({
     const [groepKenmerkIds, setGroepKenmerkIds] = useState<string[]>([]);
     const [groepNaam, setGroepNaam] = useState('');
     const [groepBeschrijving, setGroepBeschrijving] = useState('');
+
+    // Uitgebreide Parameter Beheer States
+    const [beheerParameterId, setBeheerParameterId] = useState('NIEUW');
+    const [bulkInvoerModus, setBulkInvoerModus] = useState(false);
+    const [bulkTekst, setBulkTekst] = useState(''); // Voor de komma-gescheiden lijst
 
     // Tijd-instellingen
     const [gebruikActueleTijd, setGebruikActueleTijd] = useState(true);
@@ -172,6 +177,23 @@ export default function ObservatieDashboard({
         }
         laadGroepKenmerken();
     }, [selectedGroepId]);
+    useEffect(() => {
+        if (!isParameterToevoegen || beheerParameterId === 'NIEUW') {
+            if (!bulkInvoerModus) {
+                setParamNaam('');
+                setParamDimensie('');
+                setParamType('fysisch');
+            }
+            return;
+        }
+
+        const actiefKenmerk = kenmerken.find(k => k.id === beheerParameterId);
+        if (actiefKenmerk) {
+            setParamNaam(actiefKenmerk.naam);
+            setParamDimensie(actiefKenmerk.dimensie || '');
+            setParamType(actiefKenmerk.type);
+        }
+    }, [beheerParameterId, isParameterToevoegen, bulkInvoerModus, kenmerken]);
 
     // Submit handler voor Locatiebeheer met e.preventDefault() en veilige TS error check
     async function handleLocatieBeherenSubmit(e: React.FormEvent) {
@@ -233,27 +255,94 @@ export default function ObservatieDashboard({
         }
     }
 
-    async function handleCreateParameter(e: React.FormEvent) {
+    // async function handleCreateParameter(e: React.FormEvent) {
+    //     e.preventDefault();
+    //     if (!paramNaam) return;
+
+    //     const res = await createKenmerk({
+    //         naam: paramNaam,
+    //         type: paramType,
+    //         dimensie: paramDimensie || undefined
+    //     });
+
+    //     if (res.success && res.data) {
+    //         const nieuwKenmerk = res.data as Kenmerk;
+    //         setKenmerken(prev => [...prev, nieuwKenmerk]);
+    //         setSelectedKenmerkId(nieuwKenmerk.id);
+    //         setIsParameterToevoegen(false);
+    //         setParamNaam('');
+    //         setParamDimensie('');
+    //         setStatusMessage('✅ Nieuwe parameter succesvol toegevoegd!');
+    //     }
+    // }
+    async function handleParameterBeheerSubmit(e: React.FormEvent) {
         e.preventDefault();
-        if (!paramNaam) return;
 
-        const res = await createKenmerk({
-            naam: paramNaam,
-            type: paramType,
-            dimensie: paramDimensie || undefined
-        });
+        // SCENARIO A: BULK INVOER
+        if (bulkInvoerModus) {
+            if (!bulkTekst.trim()) return;
+            setStatusMessage('Bulk parameters verwerken...');
 
-        if (res.success && res.data) {
-            const nieuwKenmerk = res.data as Kenmerk;
-            setKenmerken(prev => [...prev, nieuwKenmerk]);
-            setSelectedKenmerkId(nieuwKenmerk.id);
-            setIsParameterToevoegen(false);
-            setParamNaam('');
-            setParamDimensie('');
-            setStatusMessage('✅ Nieuwe parameter succesvol toegevoegd!');
+            // Splits op regels of op komma's
+            const lijnen = bulkTekst.split(/[\n,]+/);
+            const teVerwerken = lijnen
+                .map(lijn => lijn.trim())
+                .filter(lijn => lijn.length > 0)
+                .map(naam => ({
+                    naam: naam,
+                    type: paramType, // Gebruikt het geselecteerde type voor de hele batch
+                    dimensie: paramDimensie || null
+                }));
+
+            // Importeer createBatchKenmerken uit actions
+            const { createBatchKenmerken } = await import('./actions');
+            const res = await createBatchKenmerken(teVerwerken);
+
+            if (res.success) {
+                setStatusMessage(`✅ ${teVerwerken.length} parameters succesvol toegevoegd!`);
+                setBulkTekst('');
+                window.location.reload();
+            } else {
+                setStatusMessage('❌ Fout bij bulk-invoer.');
+            }
+            return;
+        }
+
+        // SCENARIO B: INDIVIDUEEL - NIEUW
+        if (beheerParameterId === 'NIEUW') {
+            if (!paramNaam) return;
+            setStatusMessage('Parameter aanmaken...');
+            const res = await createKenmerk({ naam: paramNaam, type: paramType, dimensie: paramDimensie || undefined });
+            
+            if (res.success) {
+                setStatusMessage('✅ Parameter succesvol toegevoegd!');
+                window.location.reload();
+            }
+        } 
+        // SCENARIO C: INDIVIDUEEL - WIJZIGEN (MUTATED)
+        else {
+            if (!paramNaam) return;
+            setStatusMessage('Parameter bijwerken in database...');
+            
+            // Roep de echte Server Action aan
+            const res = await updateKenmerkVolledig(
+                beheerParameterId, 
+                paramNaam, 
+                paramType, 
+                paramDimensie || null
+            );
+            
+            if (res.success) {
+                setStatusMessage('✅ Parameter succesvol bijgewerkt!');
+                setBeheerParameterId('NIEUW');
+                window.location.reload();
+            } else {
+                setStatusMessage('❌ Fout bij bijwerken parameter.');
+                const errorMsg = ('error' in res) ? res.error : 'Onbekende fout';
+                alert('Fout bij updaten: ' + errorMsg);
+            }
         }
     }
-
     async function handleObservatieSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!selectedLocatieId || !selectedKenmerkId || !waarde) return;
@@ -373,7 +462,7 @@ export default function ObservatieDashboard({
                 </div>
 
                 {/* FORMULIER: Parameter Toevoegen */}
-                {isParameterToevoegen && (
+                {/* {isParameterToevoegen && (
                     <form onSubmit={handleCreateParameter} className="bg-purple-50/50 p-6 rounded-xl border border-purple-200 space-y-4 animate-in fade-in duration-200">
                         <h2 className="text-base font-semibold text-purple-950">Nieuwe Parameter (Kenmerk) Toevoegen</h2>
                         <div className="grid grid-cols-2 gap-4">
@@ -396,8 +485,90 @@ export default function ObservatieDashboard({
                         </div>
                         <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">Parameter Opslaan</button>
                     </form>
-                )}
+                )} */}
+{/* FORMULIER: Geavanceerd Parameter Beheer & Bulk */}
+                {isParameterToevoegen && (
+                    <form onSubmit={handleParameterBeheerSubmit} className="bg-purple-50/50 p-6 rounded-xl border border-purple-200 space-y-4 animate-in fade-in duration-200">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-base font-semibold text-purple-950">⚙️ Parameter Beheer & Mutatie</h2>
+                            <button
+                                type="button"
+                                onClick={() => { setBulkInvoerModus(!bulkInvoerModus); setBeheerParameterId('NIEUW'); }}
+                                className="text-xs bg-purple-600 text-white px-2.5 py-1 rounded-md font-medium hover:bg-purple-700 transition-colors"
+                            >
+                                {bulkInvoerModus ? '切换 Enkel Beheer' : '🚀 Schakel naar Bulk Invoer'}
+                            </button>
+                        </div>
 
+                        {/* Modus 1: Normaal Beheer (Kiezen of Nieuw) */}
+                        {!bulkInvoerModus && (
+                            <div>
+                                <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Selecteer parameter</label>
+                                <select
+                                    value={beheerParameterId}
+                                    onChange={(e) => setBeheerParameterId(e.target.value)}
+                                    className="w-full p-2.5 border border-purple-200 rounded-lg bg-white text-sm font-medium text-purple-950"
+                                >
+                                    <option value="NIEUW">✨ -- Nieuwe Losse Parameter Aanmaken --</option>
+                                    {kenmerken.map(k => (
+                                        <option key={k.id} value={k.id}>{k.naam} {k.dimensie ? `(${k.dimensie})` : ''}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+
+                        {/* Input velden voor Kenmerken (Gedeeld of specifiek) */}
+                        <div className="p-4 bg-white/60 rounded-lg border border-purple-200/60 space-y-3">
+                            {!bulkInvoerModus ? (
+                                <div>
+                                    <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Naam parameter *</label>
+                                    <input 
+                                        type="text" 
+                                        required 
+                                        value={paramNaam} 
+                                        onChange={(e) => setParamNaam(e.target.value)} 
+                                        placeholder="Bijv. Nitraat, Waterstand" 
+                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white" 
+                                    />
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Bulk Invoer (Namen scheiden met komma of nieuwe regel) *</label>
+                                    <textarea 
+                                        required 
+                                        rows={4}
+                                        value={bulkTekst} 
+                                        onChange={(e) => setBulkTekst(e.target.value)} 
+                                        placeholder="Bijv:&#10;Windsnelheid&#10;Luchtdruk&#10;Luchtvochtigheid" 
+                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white font-mono placeholder:text-slate-400" 
+                                    />
+                                </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Type (voor selectie/batch)</label>
+                                    <select value={paramType} onChange={(e) => setParamType(e.target.value as any)} className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white">
+                                        <option value="fysisch">Fysisch (fysiek)</option>
+                                        <option value="chemisch">Chemisch</option>
+                                        <option value="biologisch">Biologisch (soorten)</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Eenheid / Dimensie</label>
+                                    <input type="text" value={paramDimensie} onChange={(e) => setParamDimensie(e.target.value)} placeholder="Bijv. mg/l, m/s" className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" className="w-full bg-purple-700 hover:bg-purple-800 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">
+                            {bulkInvoerModus 
+                                ? '🚀 Batch Parameters Toevoegen' 
+                                : beheerParameterId === 'NIEUW' ? 'Parameter Opslaan' : 'Wijzigingen Parameter Opslaan'}
+                        </button>
+                        {statusMessage && <p className="text-xs text-center font-medium text-purple-900 mt-1">{statusMessage}</p>}
+                    </form>
+                )}
                 {/* FORMULIER: Parametergroep Beheer */}
                 {isGroepBeheren && (
                     <form onSubmit={handleGroepBeheerSubmit} className="bg-amber-50/40 p-6 rounded-xl border border-amber-300 space-y-4 animate-in fade-in duration-200">
