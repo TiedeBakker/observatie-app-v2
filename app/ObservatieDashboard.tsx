@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createObservatie, getObservatiesVanLocatie, createKenmerk, createBatchKenmerken } from './actions';
 import { updateGroepVolledig, getGekoppeldeKenmerkenVanGroep, createGroepMetKenmerken, getKenmerkenVanGroep } from './actions';
-import { createLocatieMetGroepen, updateLocatieVolledig, createBatchObservaties, BatchObservatieInput, updateKenmerkVolledig} from './actions';
+import { createLocatieMetGroepen, updateLocatieVolledig, createBatchObservaties, BatchObservatieInput, updateKenmerkVolledig } from './actions';
 
 type Locatie = {
     id: string;
@@ -80,7 +80,7 @@ export default function ObservatieDashboard({
     const [openNotities, setOpenNotities] = useState<Record<string, boolean>>({});
     const [selectedGroepId, setSelectedGroepId] = useState<string>('');
     const [actieveFormulierKenmerken, setActieveFormulierKenmerken] = useState<any[]>([]);
-    
+
     // Modus voor invoer: true = individueel per parameter, false = batch (alles in één keer)
     const [individueleInvoer, setIndividueleInvoer] = useState<boolean>(false);
 
@@ -283,25 +283,24 @@ export default function ObservatieDashboard({
             if (!bulkTekst.trim()) return;
             setStatusMessage('Bulk parameters verwerken...');
 
-            // Splits op regels of op komma's
             const lijnen = bulkTekst.split(/[\n,]+/);
             const teVerwerken = lijnen
                 .map(lijn => lijn.trim())
                 .filter(lijn => lijn.length > 0)
                 .map(naam => ({
                     naam: naam,
-                    type: paramType, // Gebruikt het geselecteerde type voor de hele batch
+                    type: paramType,
                     dimensie: paramDimensie || null
                 }));
 
-            // Importeer createBatchKenmerken uit actions
             const { createBatchKenmerken } = await import('./actions');
             const res = await createBatchKenmerken(teVerwerken);
 
-            if (res.success) {
+            if (res.success && res.data) {
                 setStatusMessage(`✅ ${teVerwerken.length} parameters succesvol toegevoegd!`);
                 setBulkTekst('');
-                window.location.reload();
+                // Update de lokale state met de nieuwe parameters zodat herladen niet nodig is
+                setKenmerken(prev => [...prev, ...(res.data as Kenmerk[])]);
             } else {
                 setStatusMessage('❌ Fout bij bulk-invoer.');
             }
@@ -313,29 +312,33 @@ export default function ObservatieDashboard({
             if (!paramNaam) return;
             setStatusMessage('Parameter aanmaken...');
             const res = await createKenmerk({ naam: paramNaam, type: paramType, dimensie: paramDimensie || undefined });
-            
-            if (res.success) {
-                setStatusMessage('✅ Parameter succesvol toegevoegd!');
-                window.location.reload();
+
+            if (res.success && res.data) {
+                setStatusMessage('✅ Parameter succesvol toegevoegd! Je kunt er direct nog een invoeren.');
+                // Voeg toe aan lokale lijst en maak de velden leeg voor de volgende ronde
+                setKenmerken(prev => [...prev, res.data as Kenmerk]);
+                setParamNaam('');
+                setParamDimensie('');
+            } else {
+                setStatusMessage('❌ Fout bij aanmaken parameter.');
             }
-        } 
-        // SCENARIO C: INDIVIDUEEL - WIJZIGEN (MUTATED)
+        }
+        // SCENARIO C: INDIVIDUEEL - WIJZIGEN
         else {
             if (!paramNaam) return;
             setStatusMessage('Parameter bijwerken in database...');
-            
-            // Roep de echte Server Action aan
+
             const res = await updateKenmerkVolledig(
-                beheerParameterId, 
-                paramNaam, 
-                paramType, 
+                beheerParameterId,
+                paramNaam,
+                paramType,
                 paramDimensie || null
             );
-            
-            if (res.success) {
-                setStatusMessage('✅ Parameter succesvol bijgewerkt!');
-                setBeheerParameterId('NIEUW');
-                window.location.reload();
+
+            if (res.success && res.data) {
+                setStatusMessage('✅ Wijzigingen succesvol opgeslagen!');
+                // Update het gewijzigde kenmerk in de lokale state zodat de dropdown direct klopt
+                setKenmerken(prev => prev.map(k => k.id === beheerParameterId ? (res.data[0] as Kenmerk) : k));
             } else {
                 setStatusMessage('❌ Fout bij bijwerken parameter.');
                 const errorMsg = ('error' in res) ? res.error : 'Onbekende fout';
@@ -383,6 +386,11 @@ export default function ObservatieDashboard({
             return;
         }
 
+        // VERBETERING 3: Vraag om bevestiging voor het opslaan
+        const aantalMetingen = waarnemingen.length;
+        const bevestigd = window.confirm(`Weet je zeker dat je deze ${aantalMetingen} meting(en) wilt opslaan en definitief vastleggen?`);
+        if (!bevestigd) return; // Stop als de gebruiker op 'Annuleren' klikt
+
         const tijdstip = gebruikActueleTijd
             ? new Date().toISOString()
             : new Date(handmatigTijdstip).toISOString();
@@ -392,11 +400,31 @@ export default function ObservatieDashboard({
 
         if (res.success) {
             setStatusMessage(`✅ ${waarnemingen.length} waarneming(en) succesvol vastgelegd!`);
-            setBatchInvoer({}); 
+            setBatchInvoer({});
             setOpenNotities({});
             window.location.reload();
         } else {
             setStatusMessage('❌ Fout bij opslaan van waarnemingen.');
+        }
+    }
+
+    // VERBETERING 1: Enter-toets interpreteren als Tab
+    function handleBatchKeyDown(e: React.KeyboardEvent<HTMLInputElement>, huidigeIndex: number) {
+        if (e.key === 'Enter') {
+            e.preventDefault(); // Voorkom dat het formulier direct verzendt
+
+            // Zoek alle invoervelden met de specifieke batch-input klasse
+            const inputs = document.querySelectorAll('.batch-waarde-input') as NodeListOf<HTMLInputElement>;
+            const volgendeInput = inputs[huidigeIndex + 1];
+
+            if (volgendeInput) {
+                volgendeInput.focus();
+                volgendeInput.select(); // Selecteer direct eventuele tekst voor snelle overschrijving
+            } else {
+                // Als dit het laatste veld was, geef focus aan de verzendknop
+                const submitBtn = document.getElementById('batch-submit-btn');
+                if (submitBtn) submitBtn.focus();
+            }
         }
     }
 
@@ -461,32 +489,7 @@ export default function ObservatieDashboard({
                     )}
                 </div>
 
-                {/* FORMULIER: Parameter Toevoegen */}
-                {/* {isParameterToevoegen && (
-                    <form onSubmit={handleCreateParameter} className="bg-purple-50/50 p-6 rounded-xl border border-purple-200 space-y-4 animate-in fade-in duration-200">
-                        <h2 className="text-base font-semibold text-purple-950">Nieuwe Parameter (Kenmerk) Toevoegen</h2>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="col-span-2">
-                                <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Naam parameter *</label>
-                                <input type="text" required value={paramNaam} onChange={(e) => setParamNaam(e.target.value)} placeholder="Bijv. Nitraat, Windsnelheid" className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white" />
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Type</label>
-                                <select value={paramType} onChange={(e) => setParamType(e.target.value as any)} className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white">
-                                    <option value="fysisch">Fysisch (fysiek)</option>
-                                    <option value="chemisch">Chemisch</option>
-                                    <option value="biologisch">Biologisch (soorten)</option>
-                                </select>
-                            </div>
-                            <div>
-                                <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Eenheid / Dimensie</label>
-                                <input type="text" value={paramDimensie} onChange={(e) => setParamDimensie(e.target.value)} placeholder="Bijv. mg/l, m/s, stuks" className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white" />
-                            </div>
-                        </div>
-                        <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">Parameter Opslaan</button>
-                    </form>
-                )} */}
-{/* FORMULIER: Geavanceerd Parameter Beheer & Bulk */}
+                {/* FORMULIER: Geavanceerd Parameter Beheer & Bulk */}
                 {isParameterToevoegen && (
                     <form onSubmit={handleParameterBeheerSubmit} className="bg-purple-50/50 p-6 rounded-xl border border-purple-200 space-y-4 animate-in fade-in duration-200">
                         <div className="flex items-center justify-between">
@@ -522,25 +525,25 @@ export default function ObservatieDashboard({
                             {!bulkInvoerModus ? (
                                 <div>
                                     <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Naam parameter *</label>
-                                    <input 
-                                        type="text" 
-                                        required 
-                                        value={paramNaam} 
-                                        onChange={(e) => setParamNaam(e.target.value)} 
-                                        placeholder="Bijv. Nitraat, Waterstand" 
-                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white" 
+                                    <input
+                                        type="text"
+                                        required
+                                        value={paramNaam}
+                                        onChange={(e) => setParamNaam(e.target.value)}
+                                        placeholder="Bijv. Nitraat, Waterstand"
+                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white"
                                     />
                                 </div>
                             ) : (
                                 <div>
                                     <label className="block text-xs font-medium text-purple-800 uppercase tracking-wider mb-1">Bulk Invoer (Namen scheiden met komma of nieuwe regel) *</label>
-                                    <textarea 
-                                        required 
+                                    <textarea
+                                        required
                                         rows={4}
-                                        value={bulkTekst} 
-                                        onChange={(e) => setBulkTekst(e.target.value)} 
-                                        placeholder="Bijv:&#10;Windsnelheid&#10;Luchtdruk&#10;Luchtvochtigheid" 
-                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white font-mono placeholder:text-slate-400" 
+                                        value={bulkTekst}
+                                        onChange={(e) => setBulkTekst(e.target.value)}
+                                        placeholder="Bijv:&#10;Windsnelheid&#10;Luchtdruk&#10;Luchtvochtigheid"
+                                        className="w-full p-2.5 border border-purple-200 rounded-lg text-sm bg-white font-mono placeholder:text-slate-400"
                                     />
                                 </div>
                             )}
@@ -561,11 +564,27 @@ export default function ObservatieDashboard({
                             </div>
                         </div>
 
-                        <button type="submit" className="w-full bg-purple-700 hover:bg-purple-800 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">
-                            {bulkInvoerModus 
-                                ? '🚀 Batch Parameters Toevoegen' 
-                                : beheerParameterId === 'NIEUW' ? 'Parameter Opslaan' : 'Wijzigingen Parameter Opslaan'}
-                        </button>
+                        <div className="flex flex-col gap-2 pt-2">
+                            <button type="submit" className="w-full bg-purple-700 hover:bg-purple-800 text-white font-medium py-2 rounded-lg text-sm transition-colors shadow-xs">
+                                {bulkInvoerModus
+                                    ? '🚀 Batch Parameters Toevoegen'
+                                    : beheerParameterId === 'NIEUW' ? 'Parameter Opslaan' : 'Wijzigingen Parameter Opslaan'}
+                            </button>
+
+                            {/* De nieuwe extra Terug-knop om het formulier te sluiten */}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsParameterToevoegen(false);
+                                    setBeheerParameterId('NIEUW');
+                                    setStatusMessage('');
+                                }}
+                                className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium py-2 rounded-lg text-sm transition-colors text-center"
+                            >
+                                ↩️ Terug naar dashboard
+                            </button>
+                        </div>
+
                         {statusMessage && <p className="text-xs text-center font-medium text-purple-900 mt-1">{statusMessage}</p>}
                     </form>
                 )}
@@ -714,8 +733,8 @@ export default function ObservatieDashboard({
                             <button
                                 type="button"
                                 onClick={() => setIndividueleInvoer(false)}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!individueleInvoer 
-                                    ? 'bg-white text-blue-600 shadow-xs' 
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!individueleInvoer
+                                    ? 'bg-white text-blue-600 shadow-xs'
                                     : 'text-slate-600 hover:text-slate-900'}`}
                             >
                                 🚀 Turbo Batch-invoer
@@ -723,8 +742,8 @@ export default function ObservatieDashboard({
                             <button
                                 type="button"
                                 onClick={() => setIndividueleInvoer(true)}
-                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${individueleInvoer 
-                                    ? 'bg-white text-emerald-600 shadow-xs' 
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${individueleInvoer
+                                    ? 'bg-white text-emerald-600 shadow-xs'
                                     : 'text-slate-600 hover:text-slate-900'}`}
                             >
                                 📝 Enkele meting
@@ -802,7 +821,7 @@ export default function ObservatieDashboard({
                                     </div>
 
                                     <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden bg-white">
-                                        {actieveFormulierKenmerken.map((kenmerk) => {
+                                        {actieveFormulierKenmerken.map((kenmerk, index) => {
                                             const data = batchInvoer[kenmerk.id] || { waarde: '', notities: '' };
                                             const heeftNotitie = openNotities[kenmerk.id];
 
@@ -822,16 +841,20 @@ export default function ObservatieDashboard({
                                                                 type="text"
                                                                 value={data.waarde}
                                                                 placeholder="--"
+                                                                // Klasse en KeyDown toegevoegd voor de Enter-als-Tab functionaliteit
+                                                                className="batch-waarde-input w-full max-w-[140px] inline-block p-2 text-right border border-slate-200 rounded-md text-sm font-medium bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
                                                                 onChange={(e) => setBatchInvoer({
                                                                     ...batchInvoer,
                                                                     [kenmerk.id]: { ...data, waarde: e.target.value }
                                                                 })}
-                                                                className="w-full max-w-[140px] inline-block p-2 text-right border border-slate-200 rounded-md text-sm font-medium bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
+                                                                onKeyDown={(e) => handleBatchKeyDown(e, index)}
                                                             />
                                                         </div>
                                                         <div className="col-span-2 text-center">
                                                             <button
                                                                 type="button"
+                                                                // VERBETERING 2: Sla deze knop over tijdens het tabben
+                                                                tabIndex={-1}
                                                                 onClick={() => setOpenNotities({ ...openNotities, [kenmerk.id]: !heeftNotitie })}
                                                                 className={`p-1.5 rounded-md border text-xs transition-colors ${data.notities ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-white text-slate-400 border-slate-200'}`}
                                                             >
@@ -859,7 +882,11 @@ export default function ObservatieDashboard({
                                         <span className="text-xs text-slate-500">
                                             {Object.values(batchInvoer).filter(v => v.waarde !== '').length} van de {actieveFormulierKenmerken.length} ingevuld.
                                         </span>
-                                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors shadow-sm">
+                                        <button 
+                                            id="batch-submit-btn"
+                                            type="submit" 
+                                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors shadow-sm"
+                                        >
                                             🚀 Opslaan & Committen
                                         </button>
                                     </div>
