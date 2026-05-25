@@ -20,6 +20,7 @@ type Groep = {
     beschrijving: string | null;
     groepKenmerken?: { volgorde: number; kenmerk: Kenmerk }[];
 };
+
 export default function ObservatieDashboard({
     locaties: initieleLocaties = [],
     kenmerken: initieleKenmerken = [],
@@ -34,7 +35,6 @@ export default function ObservatieDashboard({
     const [selectedLocatieId, setSelectedLocatieId] = useState<string>(initieleLocaties[0]?.id || '');
 
     // Schakelaars voor formulieren
-    //const [isLocatieToevoegen, setIsLocatieToevoegen] = useState(false);
     const [isLocatieBeheren, setIsLocatieBeheren] = useState(false);
     const [beheerLocatieId, setBeheerLocatieId] = useState('NIEUW');
     const [locatieNaam, setLocatieNaam] = useState('');
@@ -42,8 +42,6 @@ export default function ObservatieDashboard({
     const [isParameterToevoegen, setIsParameterToevoegen] = useState(false);
 
     // Nieuwe Locatie Form State
-    const [nieuweNaam, setNieuweNaam] = useState('');
-    const [nieuweBeschrijving, setNieuweBeschrijving] = useState('');
     const [gekozenGroepIds, setGekozenGroepIds] = useState<string[]>([]);
 
     // Nieuwe Parameter Form State
@@ -70,7 +68,7 @@ export default function ObservatieDashboard({
     const [gebruikActueleTijd, setGebruikActueleTijd] = useState(true);
     const [handmatigTijdstip, setHandmatigTijdstip] = useState('');
 
-    // Batch invoer-state: Key is het kenmerkId
+    // Batch invoer-state
     const [batchInvoer, setBatchInvoer] = useState<Record<string, { waarde: string; notities: string }>>({});
     const [openNotities, setOpenNotities] = useState<Record<string, boolean>>({});
     const [selectedGroepId, setSelectedGroepId] = useState<string>(() => {
@@ -81,7 +79,8 @@ export default function ObservatieDashboard({
         return groepen[0]?.id || '';
     });
     const [actieveFormulierKenmerken, setActieveFormulierKenmerken] = useState<any[]>([]);
-    // Modus voor invoer: true = individueel per parameter, false = batch (alles in één keer)
+    
+    // Modus voor invoer: false = batch (alles in één keer), true = individueel per parameter
     const [individueleInvoer, setIndividueleInvoer] = useState<boolean>(false);
 
     useEffect(() => {
@@ -108,14 +107,12 @@ export default function ObservatieDashboard({
             return;
         }
 
-        // Bestaande groep opzoeken in de lijst die we al hebben
         const actieveGroep = groepen.find(g => g.id === beheerGroepId);
         if (actieveGroep) {
             setGroepNaam(actieveGroep.naam);
             setGroepBeschrijving(actieveGroep.beschrijving || '');
         }
 
-        // Gekoppelde vinkjes ophalen
         async function laadGroepKenmerken() {
             const res = await getGekoppeldeKenmerkenVanGroep(beheerGroepId);
             if (res.success && res.data) {
@@ -125,7 +122,6 @@ export default function ObservatieDashboard({
         laadGroepKenmerken();
     }, [beheerGroepId, isGroepBeheren, groepen]);
 
-    // Effect dat reageert zodra de te beheren locatie wijzigt
     useEffect(() => {
         if (!beheerLocatieId || !isLocatieBeheren) return;
 
@@ -133,20 +129,17 @@ export default function ObservatieDashboard({
             setLocatieNaam('');
             setLocatieBeschrijving('');
             setGekozenGroepIds([]);
-            // Reset GPS velden in de DOM (omdat ze readOnly via ID worden aangestuurd)
             const latInput = document.getElementById('lat') as HTMLInputElement;
             const lonInput = document.getElementById('lon') as HTMLInputElement;
             if (latInput && lonInput) { latInput.value = ''; lonInput.value = ''; }
             return;
         }
 
-        // Bestaande locatie opzoeken
         const actieveLocatie = locaties.find(l => l.id === beheerLocatieId);
         if (actieveLocatie) {
             setLocatieNaam(actieveLocatie.naam);
             setLocatieBeschrijving(actieveLocatie.beschrijving || '');
 
-            // Vul GPS velden in als ze bestaan
             const latInput = document.getElementById('lat') as HTMLInputElement;
             const lonInput = document.getElementById('lon') as HTMLInputElement;
             if (latInput && lonInput) {
@@ -154,7 +147,6 @@ export default function ObservatieDashboard({
                 lonInput.value = actieveLocatie.longitude ? actieveLocatie.longitude.toString() : '';
             }
 
-            // Groep ID's die momenteel gekoppeld zijn aan deze locatie inladen
             if (actieveLocatie.groepen) {
                 setGekozenGroepIds(actieveLocatie.groepen.map(g => g.id));
             } else {
@@ -162,7 +154,7 @@ export default function ObservatieDashboard({
             }
         }
     }, [beheerLocatieId, isLocatieBeheren, locaties]);
-    // Zorg dat de batch-invoer de groep pakt van de geselecteerde locatie
+
     useEffect(() => {
         const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
         if (actieveLocatie && actieveLocatie.groepen && actieveLocatie.groepen.length > 0) {
@@ -179,17 +171,14 @@ export default function ObservatieDashboard({
                 return;
             }
 
-            // Haal alléén de kenmerken van de geselecteerde groep op
             const res = await getKenmerkenVanGroep(selectedGroepId);
             if (res.success && res.data) {
                 setActieveFormulierKenmerken(res.data);
             }
         }
-
         laadGroepKenmerken();
     }, [selectedGroepId]);
 
-    // De gecombineerde Submit Handler voor Locatiebeheer
     async function handleLocatieBeherenSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!locatieNaam) return;
@@ -222,7 +211,6 @@ export default function ObservatieDashboard({
         }
     }
 
-    // HIER IS DE SUBMIT HANDLER DIE NOG ONTBRAK:
     async function handleGroepBeheerSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!groepNaam) return;
@@ -248,7 +236,6 @@ export default function ObservatieDashboard({
         }
     }
 
-    // Actie: Parameter Opslaan
     async function handleCreateParameter(e: React.FormEvent) {
         e.preventDefault();
         if (!paramNaam) return;
@@ -270,7 +257,6 @@ export default function ObservatieDashboard({
         }
     }
 
-    // Actie: Observatie Opslaan
     async function handleObservatieSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (!selectedLocatieId || !selectedKenmerkId || !waarde) return;
@@ -292,20 +278,8 @@ export default function ObservatieDashboard({
         }
     }
 
-    const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
-    const actiefKenmerk = kenmerken.find(k => k.id === selectedKenmerkId);
-    // 1. Zoek de momenteel geselecteerde kenmerkgroep op
-    //const actieveGroep = groepen.find((g: Groep) => g.id === selectedGroepId);
-
-    // 2. Leid de gesorteerde lijst met kenmerken af voor de Turbo-Invoer
-    // const actieveKenmerken = actieveGroep && (actieveGroep as any).groepKenmerken
-    //     ? [...(actieveGroep as any).groepKenmerken]
-    //         .sort((a, b) => a.volgorde - b.volgorde)
-    //         .map(gk => gk.kenmerk)
-    //     : [];
     async function handleBatchSubmit(e: React.FormEvent) {
         e.preventDefault();
-
         const waarnemingen: BatchObservatieInput[] = [];
 
         Object.entries(batchInvoer).forEach(([kId, data]) => {
@@ -323,7 +297,6 @@ export default function ObservatieDashboard({
             return;
         }
 
-        // Tijdstempel bepalen conform SQLite text-indeling
         const tijdstip = gebruikActueleTijd
             ? new Date().toISOString()
             : new Date(handmatigTijdstip).toISOString();
@@ -333,13 +306,17 @@ export default function ObservatieDashboard({
 
         if (res.success) {
             setStatusMessage(`✅ ${waarnemingen.length} waarneming(en) succesvol vastgelegd!`);
-            setBatchInvoer({}); // Maak formulier leeg
+            setBatchInvoer({});
             setOpenNotities({});
             window.location.reload();
         } else {
             setStatusMessage('❌ Fout bij opslaan van waarnemingen.');
         }
     }
+
+    const actieveLocatie = locaties.find(l => l.id === selectedLocatieId);
+    const actiefKenmerk = kenmerken.find(k => k.id === selectedKenmerkId);
+
     return (
         <div className="grid md:grid-cols-2 gap-8">
 
@@ -453,7 +430,7 @@ export default function ObservatieDashboard({
                                 <input
                                     type="text"
                                     required
-                                    value={groepNaam}
+                                    value={groepNaam || ''}
                                     onChange={(e) => setGroepNaam(e.target.value)}
                                     placeholder="Bijv. Grondwatermetingen, Meterstanden"
                                     className="w-full p-2.5 border border-amber-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-amber-500"
@@ -462,7 +439,7 @@ export default function ObservatieDashboard({
                             <div>
                                 <label className="block text-xs font-medium text-amber-800 uppercase tracking-wider mb-1">Beschrijving</label>
                                 <textarea
-                                    value={groepBeschrijving}
+                                    value={groepBeschrijving || ''}
                                     onChange={(e) => setGroepBeschrijving(e.target.value)}
                                     rows={2}
                                     placeholder="Waar is deze set metingen voor bedoeld?..."
@@ -476,24 +453,26 @@ export default function ObservatieDashboard({
                                 Kenmerken in deze groep
                             </label>
                             <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2 max-h-48 overflow-y-auto shadow-inner">
-                                {kenmerken.map(k => (
-                                    <label key={k.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={groepKenmerkIds.includes(k.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setGroepKenmerkIds([...groepKenmerkIds, k.id]);
-                                                } else {
-                                                    setGroepKenmerkIds(groepKenmerkIds.filter(id => id !== k.id));
-                                                }
-                                            }}
-                                            className="rounded border-amber-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
-                                        />
-                                        <span className="font-medium">{k.naam}</span>
-                                        <span className="text-xs text-slate-400 italic">({k.type}{k.dimensie ? `, ${k.dimensie}` : ''})</span>
-                                    </label>
-                                ))}
+                                {kenmerken.map(k => {
+                                    const isGevinkt = groepKenmerkIds.includes(k.id);
+                                    return (
+                                        <label key={k.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={isGevinkt}
+                                                onChange={(e) => {
+                                                    const { checked } = e.target;
+                                                    setGroepKenmerkIds(prev => 
+                                                        checked ? [...prev, k.id] : prev.filter(id => id !== k.id)
+                                                    );
+                                                }}
+                                                className="rounded border-amber-300 text-amber-600 focus:ring-amber-500 w-4 h-4"
+                                            />
+                                            <span className="font-medium">{k.naam}</span>
+                                            <span className="text-xs text-slate-400 italic">({k.type}{k.dimensie ? `, ${k.dimensie}` : ''})</span>
+                                        </label>
+                                    );
+                                })}
                             </div>
                         </div>
 
@@ -529,7 +508,6 @@ export default function ObservatieDashboard({
                             </select>
                         </div>
 
-                        {/* ALTIJD ZICHTBARE GEGEVENS */}
                         <div className="p-4 bg-white/60 rounded-lg border border-emerald-200/60 space-y-3">
                             <div>
                                 <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-1">
@@ -538,7 +516,7 @@ export default function ObservatieDashboard({
                                 <input
                                     type="text"
                                     required
-                                    value={locatieNaam}
+                                    value={locatieNaam || ''}
                                     onChange={(e) => setLocatieNaam(e.target.value)}
                                     placeholder="Bijv. Meetstation Noord, Sloot A"
                                     className="w-full p-2.5 border border-emerald-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-emerald-500"
@@ -548,7 +526,7 @@ export default function ObservatieDashboard({
                             <div>
                                 <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-1">Beschrijving</label>
                                 <textarea
-                                    value={locatieBeschrijving}
+                                    value={locatieBeschrijving || ''}
                                     onChange={(e) => setLocatieBeschrijving(e.target.value)}
                                     rows={2}
                                     placeholder="Details over bereikbaarheid, sleutels of referentieniveaus..."
@@ -557,33 +535,33 @@ export default function ObservatieDashboard({
                             </div>
                         </div>
 
-                        {/* CHECKBOXES VOOR PARAMETERGROEPEN */}
                         <div>
                             <label className="block text-xs font-medium text-emerald-800 uppercase tracking-wider mb-2">
                                 Koppel aan Parametergroep(en) (Meerdere mogelijk)
                             </label>
                             <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-2 max-h-32 overflow-y-auto shadow-inner">
-                                {groepen.map(g => (
-                                    <label key={g.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
-                                        <input
-                                            type="checkbox"
-                                            checked={gekozenGroepIds.includes(g.id)}
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setGekozenGroepIds([...gekozenGroepIds, g.id]);
-                                                } else {
-                                                    setGekozenGroepIds(gekozenGroepIds.filter(id => id !== g.id));
-                                                }
-                                            }}
-                                            className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
-                                        />
-                                        <span className="font-medium">{g.naam}</span>
-                                    </label>
-                                ))}
+                                {groepen.map(g => {
+                                    const isGevinkt = gekozenGroepIds.includes(g.id);
+                                    return (
+                                        <label key={g.id} className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer hover:text-slate-900 select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={isGevinkt}
+                                                onChange={(e) => {
+                                                    const { checked } = e.target;
+                                                    setGekozenGroepIds(prev => 
+                                                        checked ? [...prev, g.id] : prev.filter(id => id !== g.id)
+                                                    );
+                                                }}
+                                                className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                                            />
+                                            <span className="font-medium">{g.naam}</span>
+                                        </label>
+                                    );
+                                })}
                             </div>
                         </div>
 
-                        {/* GPS COMPONENT */}
                         <div className="bg-white p-3 rounded-lg border border-emerald-200 space-y-2">
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">GPS Coördinaten</span>
@@ -614,36 +592,38 @@ export default function ObservatieDashboard({
                         </div>
                     </form>
                 )}
+
                 {/* SCHAKELAAR VOOR INVOERMODUS */}
-{!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && (
-    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
-        <div>
-            <h3 className="text-sm font-semibold text-slate-900">Invoermethode</h3>
-            <p className="text-xs text-slate-500">Kies hoe je metingen wilt invoeren op deze locatie.</p>
-        </div>
-        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
-            <button
-                type="button"
-                onClick={() => setIndividueleInvoer(false)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!individueleInvoer 
-                    ? 'bg-white text-blue-600 shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900'}`}
-            >
-                🚀 Turbo Batch-invoer
-            </button>
-            <button
-                type="button"
-                onClick={() => setIndividueleInvoer(true)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${individueleInvoer 
-                    ? 'bg-white text-emerald-600 shadow-xs' 
-                    : 'text-slate-600 hover:text-slate-900'}`}
-            >
-                📝 Enkele meting
-            </button>
-        </div>
-    </div>
-)}
-                {/* METING INVOEREN (ENKEL)*/}
+                {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && (
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+                        <div>
+                            <h3 className="text-sm font-semibold text-slate-900">Invoermethode</h3>
+                            <p className="text-xs text-slate-500">Kies hoe je metingen wilt invoeren op deze locatie.</p>
+                        </div>
+                        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200">
+                            <button
+                                type="button"
+                                onClick={() => setIndividueleInvoer(false)}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${!individueleInvoer 
+                                    ? 'bg-white text-blue-600 shadow-xs' 
+                                    : 'text-slate-600 hover:text-slate-900'}`}
+                            >
+                                🚀 Turbo Batch-invoer
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setIndividueleInvoer(true)}
+                                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${individueleInvoer 
+                                    ? 'bg-white text-emerald-600 shadow-xs' 
+                                    : 'text-slate-600 hover:text-slate-900'}`}
+                            >
+                                📝 Enkele meting
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* METING INVOEREN (ENKEL) */}
                 {!isLocatieBeheren && !isParameterToevoegen && selectedLocatieId && individueleInvoer && (
                     <form onSubmit={handleObservatieSubmit} className="bg-white p-6 rounded-xl border border-emerald-200 shadow-xs space-y-4">
                         <h2 className="text-lg font-semibold text-slate-900">Meting Vastleggen</h2>
@@ -667,11 +647,12 @@ export default function ObservatieDashboard({
                         {statusMessage && <p className="text-xs text-center font-medium text-slate-600 mt-2">{statusMessage}</p>}
                     </form>
                 )}
-                {/* ULTRA-SNELLE BATCH INVOER (KENMERKEN) */}
+
+                {/* ULTRA-SNELLE BATCH INVOER */}
                 {!isLocatieBeheren && !isParameterToevoegen && !individueleInvoer && selectedLocatieId && (
                     <form onSubmit={handleBatchSubmit} className="bg-white p-6 rounded-xl border border-blue-200 shadow-sm space-y-6">
 
-                        {/* TIJDSTIP CONFIGURATIE (Punt 3) */}
+                        {/* TIJDSTIP CONFIGURATIE */}
                         <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
                                 <h3 className="text-sm font-semibold text-slate-900">Tijdstip van waarneming</h3>
@@ -700,7 +681,7 @@ export default function ObservatieDashboard({
                             </div>
                         </div>
 
-                        {/* INVOERLIJST OP VOLGORDE (Punt 1 & 2) */}
+                        {/* INVOERLIJST OP VOLGORDE */}
                         <div className="space-y-3">
                             <div className="grid grid-cols-12 gap-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                                 <div className="col-span-6">Kenmerk (Parameter / Soort)</div>
