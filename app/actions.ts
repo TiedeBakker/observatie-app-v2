@@ -227,7 +227,7 @@ export async function createObservatie(params: {
     }
 }
 
-// Haal observaties op voor een specifieke locatie (inclusief relaties)
+// Haal observaties op voor een specifieke locatie (inclusief relaties) LIMIT 100 en gesorteerd op tijdstip (nieuwste eerst)
 export async function getObservatiesVanLocatie(locatieId: string) {
     try {
         const data = await db
@@ -235,18 +235,22 @@ export async function getObservatiesVanLocatie(locatieId: string) {
                 id: observaties.id,
                 waarde: observaties.waarde,
                 notities: observaties.notities,
+                tijdstip: observaties.tijdstip,
                 kenmerkNaam: kenmerken.naam,
                 kenmerkType: kenmerken.type,
                 dimensie: kenmerken.dimensie,
             })
             .from(observaties)
             .leftJoin(kenmerken, eq(observaties.kenmerkId, kenmerken.id))
-            .where(eq(observaties.locatieId, locatieId));
+            .where(eq(observaties.locatieId, locatieId))
+            // Zorg dat de database direct de nieuwste eerst zet, en kap af op 100
+            .orderBy(desc(observaties.tijdstip))
+            .limit(100);
 
         return { success: true, data };
     } catch (error) {
-        console.error('Fout bij ophalen observaties:', error);
-        return { success: false, error: 'Kon observaties niet ophalen' };
+        console.error("Fout bij ophalen observaties:", error);
+        return { success: false, error: "Kon geschiedenis niet ophalen." };
     }
 }
 // Haal alle parametergroepen op

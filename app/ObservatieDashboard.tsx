@@ -13,6 +13,15 @@ type Locatie = {
     longitude?: number | null;
     groepen?: { id: string; naam: string; }[];
 };
+type Observatie = {
+    id: string;
+    waarde: string;
+    notities: string | null;
+    kenmerkNaam: string | null;
+    kenmerkType: "fysisch" | "chemisch" | "biologisch" | null;
+    dimensie: string | null;
+    tijdstip: string | null; // Deze miste in de type-inferentie!
+};
 type Kenmerk = { id: string; naam: string; dimensie: string | null; type: 'fysisch' | 'chemisch' | 'biologisch'; };
 type Groep = {
     id: string;
@@ -52,7 +61,7 @@ export default function ObservatieDashboard({
     const [paramDimensie, setParamDimensie] = useState('');
 
     // Observaties States
-    const [observaties, setObservaties] = useState<any[]>([]);
+    const [observaties, setObservaties] = useState<Observatie[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedKenmerkId, setSelectedKenmerkId] = useState<string>(initieleKenmerken[0]?.id || '');
     const [waarde, setWaarde] = useState('');
@@ -84,6 +93,7 @@ export default function ObservatieDashboard({
     // Modus voor invoer: true = individueel per parameter, false = batch (alles in één keer)
     const [individueleInvoer, setIndividueleInvoer] = useState<boolean>(false);
 
+
     // 1. Laad observaties geschiedenis in bij locatiewijziging
     useEffect(() => {
         if (!selectedLocatieId || selectedLocatieId === 'NIEUW') {
@@ -93,12 +103,14 @@ export default function ObservatieDashboard({
         async function laadObservaties() {
             setLoading(true);
             const res = await getObservatiesVanLocatie(selectedLocatieId);
-            if (res.success && res.data) setObservaties(res.data);
+            if (res.success && res.data) {
+                // De database levert het al gesorteerd en gelimiteerd aan!
+                setObservaties(res.data as Observatie[]);
+            }
             setLoading(false);
         }
         laadObservaties();
     }, [selectedLocatieId]);
-
     // 2. Beheer Groepen vinkjes en gegevens inladen
     useEffect(() => {
         if (!beheerGroepId || !isGroepBeheren) return;
@@ -839,6 +851,7 @@ export default function ObservatieDashboard({
                                                         <div className="col-span-4 text-right">
                                                             <input
                                                                 type="text"
+                                                                inputMode="decimal" // <-- DIT ZORGT VOOR HET CIJFERTOETSENBORD OP MOBIEL
                                                                 value={data.waarde}
                                                                 placeholder="--"
                                                                 // Klasse en KeyDown toegevoegd voor de Enter-als-Tab functionaliteit
@@ -882,9 +895,9 @@ export default function ObservatieDashboard({
                                         <span className="text-xs text-slate-500">
                                             {Object.values(batchInvoer).filter(v => v.waarde !== '').length} van de {actieveFormulierKenmerken.length} ingevuld.
                                         </span>
-                                        <button 
+                                        <button
                                             id="batch-submit-btn"
-                                            type="submit" 
+                                            type="submit"
                                             className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg text-sm transition-colors shadow-sm"
                                         >
                                             🚀 Opslaan & Committen
@@ -897,27 +910,77 @@ export default function ObservatieDashboard({
                 )}
             </div>
 
-            {/* Rechterkant: Geschiedenis */}
-            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs">
-                <h2 className="text-lg font-semibold mb-4 text-slate-900">
+            {/* Rechterkant: Geschiedenis met datumweergave (Nieuwste bovenaan) */}
+            <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs flex flex-col h-full">
+                <h2 className="text-lg font-semibold text-slate-900">
                     Metingen voor <span className="text-blue-600">{actieveLocatie?.naam}</span>
                 </h2>
-                {loading ? <p className="text-sm text-slate-400 italic">Laden...</p> : observaties.length === 0 ? (
-                    <p className="text-sm text-slate-400 italic bg-slate-50 p-4 text-center rounded-lg border border-dashed">Nee geen metingen gevonden.</p>
+                
+                {/* Waarschuwing bij bereiken van de limit */}
+                {observaties.length >= 100 && (
+                    <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1 mt-1 font-medium italic">
+                        ⚠️ Alleen de 100 meest recente metingen worden getoond om het dashboard snel te houden.
+                    </p>
+                )}
+
+                {loading ? (
+                    <p className="text-sm text-slate-400 italic">Laden...</p>
+                ) : observaties.length === 0 ? (
+                    <p className="text-sm text-slate-400 italic bg-slate-50 p-4 text-center rounded-lg border border-dashed">
+                        Nog geen metingen gevonden voor deze locatie.
+                    </p>
                 ) : (
-                    <div className="space-y-3">
-                        {observaties.map((obs) => (
-                            <div key={obs.id} className="border-l-4 border-blue-500 bg-slate-50 p-3 rounded-r-lg">
-                                <div className="flex justify-between items-start">
-                                    <span className="font-semibold text-slate-900 text-sm">{obs.kenmerkNaam}</span>
-                                    <span className="text-xs bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded-sm">{obs.waarde} {obs.dimensie}</span>
+                    <div className="space-y-4 overflow-y-auto max-h-[70vh] pr-2">
+                        {Object.entries(
+                            observaties.reduce((acc, obs: Observatie) => {
+                                const t = obs.tijdstip ? new Date(obs.tijdstip).toLocaleString('nl-NL', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                }) : 'Onbekend tijdstip';
+                                if (!acc[t]) acc[t] = [];
+                                acc[t].push(obs);
+                                return acc;
+                            }, {} as Record<string, Observatie[]>)
+                        )
+                            .sort((a, b) => b[0].localeCompare(a[0]))
+                            .map(([tijdstipLabel, metingenInBatch]) => (
+                                <div key={tijdstipLabel} className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-2">
+                                    {/* Datum/Tijdstip Kopregel */}
+                                    <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                                        <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                                            📅 {tijdstipLabel}
+                                        </span>
+                                        <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-sm font-medium">
+                                            {metingenInBatch.length} {metingenInBatch.length === 1 ? 'meting' : 'metingen'}
+                                        </span>
+                                    </div>
+
+                                    {/* De metingen binnen dit specifieke tijdstip */}
+                                    <div className="space-y-2 pt-1">
+                                        {metingenInBatch.map((obs: Observatie) => (
+                                            <div key={obs.id} className="flex flex-col text-sm">
+                                                <div className="flex justify-between items-baseline">
+                                                    <span className="font-medium text-slate-800">{obs.kenmerkNaam}</span>
+                                                    <span className="font-mono bg-blue-50 text-blue-700 font-bold px-2 py-0.5 rounded text-xs border border-blue-100">
+                                                        {obs.waarde} {obs.dimensie}
+                                                    </span>
+                                                </div>
+                                                {obs.notities && (
+                                                    <p className="text-xs text-amber-700 italic bg-amber-50/50 px-2 py-1 rounded mt-0.5 border border-amber-100/40">
+                                                        💬 {obs.notities}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
                     </div>
                 )}
             </div>
-
         </div>
     );
 }
