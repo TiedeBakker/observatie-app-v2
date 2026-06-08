@@ -915,7 +915,7 @@ export default function ObservatieDashboard({
                 <h2 className="text-lg font-semibold text-slate-900">
                     Metingen voor <span className="text-blue-600">{actieveLocatie?.naam}</span>
                 </h2>
-                
+
                 {/* Waarschuwing bij bereiken van de limit */}
                 {observaties.length >= 100 && (
                     <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1 mt-1 font-medium italic">

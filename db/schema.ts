@@ -115,3 +115,35 @@ export type Kenmerk = typeof kenmerken.$inferSelect;
 export type KenmerkGroep = typeof kenmerkGroepen.$inferSelect;
 export type Observatie = typeof observaties.$inferSelect;
 export type LocatieGroep = typeof locatieGroepen.$inferSelect;
+
+// 1. Hoofdtabel voor de sportsessies (Polar)
+export const sportSessies = sqliteTable('sport_sessies', {
+    id: text('id').primaryKey(), // We gebruiken hier straks de unieke 'transaction-id' of 'exercise-id' van Polar zelf
+    startTijd: text('start_tijd').notNull(), // ISO string van de start van je training
+    duur: integer('duur').notNull(), // Duur in seconden
+    calorieen: integer('calorieen'),
+    gemiddeldeHartslag: integer('gemiddelde_hartslag'),
+    maximaleHartslag: integer('maximale_hartslag'),
+    sportType: text('sport_type'), // Bijv. 'RUNNING', 'CYCLING'
+    createdAt: text('created_at').default(new Date().toISOString()),
+});
+
+// 2. Detailtabel voor de seconden-data (Hartslag & GPS)
+export const sportSessieMetingen = sqliteTable('sport_sessie_metingen', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessieId: text('sessie_id')
+        .notNull()
+        .references(() => sportSessies.id, { onDelete: 'cascade' }), // Als een sessie wordt gewist, gaan alle metingen mee
+    tijdVerschuiving: integer('tijd_verschuiving').notNull(), // Aantal seconden sinds de start van de sessie
+    hartslag: integer('hartslag'), // Hartslag op dit specifieke moment
+    latitude: real('latitude'), // GPS Breedtegraad (indien beschikbaar)
+    longitude: real('longitude'), // GPS Lengtegraad (indien beschikbaar)
+    hoogte: real('hoogte'), // Hoogte in meters (indien beschikbaar)
+});
+// Tabel om de Polar API-koppeling voor de gebruiker te onthouden
+export const polarConfig = sqliteTable('polar_config', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    polarUserId: text('polar_user_id').notNull().unique(), // Deze 'unique' is cruciaal
+    accessToken: text('access_token').notNull(),
+    gekoppeldOp: text('gekoppeld_op').default(new Date().toISOString()),
+});
